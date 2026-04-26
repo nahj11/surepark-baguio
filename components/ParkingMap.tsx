@@ -14,6 +14,7 @@ interface ParkingSlot {
   paid?: boolean
   activeQrToken?: string
   checkedIn?: boolean
+  activated?: boolean
 }
 
 interface LocationMeta {
