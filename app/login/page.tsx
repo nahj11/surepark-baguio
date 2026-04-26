@@ -180,7 +180,7 @@ export default function LoginPage() {
           {/* Demo Info */}
           <div className="mt-6 pt-6 border-t border-slate-700">
             <p className="text-xs text-slate-400 text-center">
-              Demo Mode - Data stored locally in browser
+              SurePark Baguio v1.0
             </p>
           </div>
         </div>
