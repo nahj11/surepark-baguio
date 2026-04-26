@@ -52,6 +52,7 @@ interface ParkingSlot {
   activeQrToken?: string
   checkedIn?: boolean
   bollardUp?: boolean   // true = raised (blocking), false = lowered (car can enter/exit)
+  activated?: boolean
 }
 
 const LOCATIONS = ["Session Road", "Harrison Road", "SM Baguio", "Cedar Peak", "Mabini"]
