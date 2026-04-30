@@ -1,78 +1,121 @@
-/**
- * GET  /api/command?slotId=1
- *   ESP32 polls this every 2 seconds.
- *   Returns whether the app has activated this slot (user paid + pressed Activate).
- *   Response: { activated: true/false, bollardUp: true/false }
- *
- * POST /api/command
- *   Dashboard sends this when user presses "Activate Slot" button.
- *   Body: { slotId: 1, activated: true }
- *   This replaces both physical buttons on the ESP32.
- */
 import { NextRequest, NextResponse } from "next/server"
-import { slotStore } from "@/lib/store"
+import { ref, get, update } from "firebase/database"
+import { db } from "@/lib/firebase"
 
+// =====================================================
+// GET → ESP32 polls this every ~2 seconds
+// =====================================================
 export async function GET(req: NextRequest) {
   const slotId = Number(req.nextUrl.searchParams.get("slotId"))
+
   if (!slotId) {
-    return NextResponse.json({ ok: false, error: "slotId required" }, { status: 400 })
+    return NextResponse.json(
+      { ok: false, error: "slotId required" },
+      { status: 400 }
+    )
   }
 
-  const slot = slotStore.getById(slotId)
-  if (!slot) {
-    return NextResponse.json({ ok: false, error: `Slot ${slotId} not found` }, { status: 404 })
-  }
+  try {
+    const snapshot = await get(ref(db, `slots/slot${slotId}`))
 
-  return NextResponse.json(
-    {
-      ok:        true,
-      slotId:    slot.id,
-      reserved:  slot.status === "reserved",  // blue LED
-      paid:      slot.paid ?? false,           // gate unlock condition
-      bollardUp: slot.bollardUp ?? true,       // true = closed, false = open
-      occupied:  slot.status === "occupied",  // red LED
-    },
-    { headers: { "Cache-Control": "no-store" } },
-  )
+    if (!snapshot.exists()) {
+      return NextResponse.json(
+        { ok: false, error: `Slot ${slotId} not found` },
+        { status: 404 }
+      )
+    }
+
+    const slot = snapshot.val()
+
+    return NextResponse.json(
+      {
+        ok: true,
+        slotId: slotId,
+
+        // ✅ derive from Firebase
+        reserved: slot.reservedBy !== "",
+        paid: slot.paid || false,
+        bollardUp: slot.bollardUp ?? true,
+
+        // IMPORTANT: use sensorStatus (NOT status)
+        occupied: slot.sensorStatus === "occupied",
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    )
+
+  } catch (err) {
+    return NextResponse.json(
+      { ok: false, error: "Failed to fetch slot" },
+      { status: 500 }
+    )
+  }
 }
 
+
+// =====================================================
+// POST → App activates slot (open gate)
+// =====================================================
 export async function POST(req: NextRequest) {
-  let body: { slotId?: number; activated?: boolean }
+  let body
+
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 })
+    return NextResponse.json(
+      { ok: false, error: "Invalid JSON body" },
+      { status: 400 }
+    )
   }
 
   const { slotId, activated } = body
 
   if (typeof slotId !== "number" || typeof activated !== "boolean") {
     return NextResponse.json(
-      { ok: false, error: "Required: slotId (number) and activated (boolean)" },
-      { status: 400 },
+      { ok: false, error: "slotId (number) and activated (boolean) required" },
+      { status: 400 }
     )
   }
 
-  const slot = slotStore.getById(slotId)
-  if (!slot) {
-    return NextResponse.json({ ok: false, error: `Slot ${slotId} not found` }, { status: 404 })
-  }
+  try {
+    const slotRef = ref(db, `slots/slot${slotId}`)
+    const snapshot = await get(slotRef)
 
-  // Only allow activation if slot is reserved and paid
-  if (activated && slot.status !== "reserved") {
+    if (!snapshot.exists()) {
+      return NextResponse.json(
+        { ok: false, error: `Slot ${slotId} not found` },
+        { status: 404 }
+      )
+    }
+
+    const slot = snapshot.val()
+
+    // 🚫 VALIDATION (same as your old logic)
+    if (activated && slot.reservedBy === "") {
+      return NextResponse.json(
+        { ok: false, error: "Slot must be reserved first" },
+        { status: 403 }
+      )
+    }
+
+    if (activated && !slot.paid) {
+      return NextResponse.json(
+        { ok: false, error: "Payment required before activation" },
+        { status: 403 }
+      )
+    }
+
+    // ✅ UPDATE FIREBASE ONLY
+    await update(slotRef, {
+      activated: activated,
+      bollardUp: activated ? false : true   // open when activated
+    })
+
+    return NextResponse.json({ ok: true })
+
+  } catch (err) {
     return NextResponse.json(
-      { ok: false, error: "Slot must be reserved before activating" },
-      { status: 403 },
+      { ok: false, error: "Failed to update slot" },
+      { status: 500 }
     )
   }
-
-  if (activated && !slot.paid) {
-    return NextResponse.json(
-      { ok: false, error: "Payment must be completed before activating" },
-      { status: 403 },
-    )
-  }
-
-  const updated = slotStore.update(slotId, { activated })
-  return NextResponse.json({ ok: true, slot: updated })
 }
