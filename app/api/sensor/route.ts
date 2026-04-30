@@ -22,10 +22,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true })
 
-  } catch (err) {
-    return NextResponse.json(
-      { ok: false, error: err.message },
-      { status: 500 }
-    )
-  }
+  } catch (err: any) {
+  return NextResponse.json(
+    { ok: false, error: err?.message || "Unknown error" },
+    { status: 500 }
+  )
+}
 }
