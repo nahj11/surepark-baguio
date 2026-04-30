@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/firebaseAdmin"
 
-// Prevent static evaluation during build
 export const dynamic = "force-dynamic"
 
 export async function POST(req: NextRequest) {
@@ -26,7 +25,6 @@ export async function POST(req: NextRequest) {
       (slot) => {
         if (!slot) return slot
 
-        // Block if already reserved
         if (slot.reservedBy && slot.reservedBy !== "") {
           return
         }
