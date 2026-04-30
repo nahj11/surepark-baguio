@@ -14,6 +14,10 @@
     "autoprefixer": "^10.5.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
+<<<<<<< HEAD
+=======
+    "firebase": "^12.12.1",
+>>>>>>> 5a7118607394d510285464c9608b6d2849604f96
     "firebase-admin": "^13.8.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.400.0",
