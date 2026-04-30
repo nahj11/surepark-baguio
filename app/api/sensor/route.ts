@@ -1,31 +1,60 @@
-import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/firebaseAdmin"
+import { NextResponse } from "next/server"
 
-export async function POST(req: NextRequest) {
+export async function POST(req) {
   try {
-    const { slotId, carPresent } = await req.json()
+    const { slotId, userId } = await req.json()
 
-    if (typeof slotId !== "number" || typeof carPresent !== "boolean") {
+    if (!slotId || !userId) {
       return NextResponse.json(
-        { ok: false, error: "slotId (number) and carPresent (boolean) required" },
+        { ok: false, error: "slotId and userId required" },
         { status: 400 }
       )
     }
 
-    // ✅ correct Firebase path
     const slotRef = db.ref(`slots/slot${slotId}`)
 
-    // ✅ ONLY update sensorStatus
-    await slotRef.update({
-      sensorStatus: carPresent ? "occupied" : "available"
+    let success = false
+    let updatedSlot = null
+
+    await slotRef.transaction((slot) => {
+      if (!slot) return slot
+
+      // 🔒 block if already reserved
+      if (slot.reservedBy && slot.reservedBy !== "") {
+        return
+      }
+
+      // ✅ safe reserve
+      return {
+        ...slot,
+        reservedBy: userId,
+        status: "reserved",
+        reservedAt: Date.now()
+      }
+    }, (error, committed, snapshot) => {
+      if (!error && committed) {
+        success = true
+        updatedSlot = snapshot.val()
+      }
     })
 
-    return NextResponse.json({ ok: true })
+    if (!success) {
+      return NextResponse.json(
+        { ok: false, error: "Slot already taken" },
+        { status: 409 }
+      )
+    }
+
+    return NextResponse.json({
+      ok: true,
+      slot: updatedSlot
+    })
 
   } catch (err: any) {
-  return NextResponse.json(
-    { ok: false, error: err?.message || "Unknown error" },
-    { status: 500 }
-  )
-}
+    return NextResponse.json(
+      { ok: false, error: err?.message || "Unknown error" },
+      { status: 500 }
+    )
+  }
 }
