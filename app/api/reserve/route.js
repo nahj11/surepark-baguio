@@ -1,9 +1,14 @@
+import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/firebaseAdmin"
-import { NextResponse } from "next/server"
 
-export async function POST(req) {
+// Prevent static evaluation during build
+export const dynamic = "force-dynamic"
+
+export async function POST(req: NextRequest) {
   try {
-    const { slotId, userId } = await req.json()
+    const body = await req.json()
+    const slotId = body?.slotId
+    const userId = body?.userId
 
     if (!slotId || !userId) {
       return NextResponse.json(
@@ -12,32 +17,35 @@ export async function POST(req) {
       )
     }
 
-    // ✅ correct path (IMPORTANT)
     const slotRef = db.ref(`slots/slot${slotId}`)
 
     let success = false
-    let updatedSlot = null
+    let updatedSlot: any = null
 
-    await slotRef.transaction((slot) => {
-      if (!slot) return slot
+    await slotRef.transaction(
+      (slot) => {
+        if (!slot) return slot
 
-      // 🔒 BLOCK if already reserved
-      if (slot.reservedBy && slot.reservedBy !== "") {
-        return // abort transaction
+        // Block if already reserved
+        if (slot.reservedBy && slot.reservedBy !== "") {
+          return
+        }
+
+        return {
+          ...slot,
+          reservedBy: userId,
+          status: "reserved",
+          reservedAt: Date.now(),
+        }
+      },
+      (error, committed, snapshot) => {
+        if (!error && committed) {
+          success = true
+          updatedSlot = snapshot?.val() || null
+        }
       }
+    )
 
-      // ✅ SAFE RESERVE
-      slot.reservedBy = userId
-      slot.status = "reserved"
-      slot.reservedAt = Date.now()
-
-      success = true
-      updatedSlot = slot
-
-      return slot
-    })
-
-    // ❌ transaction failed
     if (!success) {
       return NextResponse.json(
         { ok: false, error: "Slot already taken" },
@@ -47,12 +55,12 @@ export async function POST(req) {
 
     return NextResponse.json({
       ok: true,
-      slot: updatedSlot
+      slot: updatedSlot,
     })
 
-  } catch (err) {
+  } catch (err: any) {
     return NextResponse.json(
-      { ok: false, error: err.message },
+      { ok: false, error: err?.message || "Unknown error" },
       { status: 500 }
     )
   }
