@@ -1,63 +1,67 @@
-"use client";
+"use client"
 
-import { useEffect, useState } from "react";
-import { db } from "@/lib/firebase";
-import { ref, onValue, runTransaction } from "firebase/database";
+import { useEffect, useState } from "react"
+import { createClient } from "@supabase/supabase-js"
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 export default function Home() {
-  const [slots, setSlots] = useState<any>({});
-  const userId = "user_" + Math.random().toString(36).substring(7);
+  const [slots, setSlots] = useState<any[]>([])
+
+  // 📡 Fetch slots
+  const fetchSlots = async () => {
+    const { data } = await supabase.from("slots").select("*")
+    if (data) setSlots(data)
+  }
 
   useEffect(() => {
-    const slotsRef = ref(db, "slots");
+    fetchSlots()
 
-    return onValue(slotsRef, (snapshot) => {
-      setSlots(snapshot.val());
-    });
-  }, []);
+    // 🔥 REALTIME UPDATES
+    const channel = supabase
+      .channel("slots")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "slots" },
+        () => {
+          fetchSlots()
+        }
+      )
+      .subscribe()
 
-  const reserveSlot = async (slotId: string) => {
-    const slotRef = ref(db, "slots/" + slotId);
-
-    await runTransaction(slotRef, (slot) => {
-      if (!slot) return;
-
-      if (slot.status === "reserved") {
-        alert("Already reserved");
-        return;
-      }
-
-      return {
-        ...slot,
-        status: "reserved",
-        reservedBy: userId,
-      };
-    });
-  };
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1>SurePark</h1>
+    <div>
+      <h1>SurePark Dashboard</h1>
 
-      {Object.keys(slots).map((id) => {
-        const slot = slots[id];
-        const available = !slot.occupied && slot.status !== "reserved";
+      {slots.map((slot) => (
+        <div key={slot.id}>
+          <h3>{slot.name}</h3>
+          <p>Status: {slot.status}</p>
 
-        return (
-          <div key={id} style={{ marginBottom: 10 }}>
-            <b>{id}</b> —{" "}
-            {available ? "Available" : "Occupied/Reserved"}
+          <button
+            onClick={async () => {
+              const res = await fetch("/api/reserve", {
+                method: "POST",
+                body: JSON.stringify({ slotId: slot.id }),
+              })
 
-            <button
-              disabled={!available}
-              onClick={() => reserveSlot(id)}
-              style={{ marginLeft: 10 }}
-            >
-              Reserve
-            </button>
-          </div>
-        );
-      })}
+              if (!res.ok) {
+                alert("Slot already taken!")
+              }
+            }}
+          >
+            Reserve
+          </button>
+        </div>
+      ))}
     </div>
-  );
+  )
 }

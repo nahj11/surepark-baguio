@@ -1,5 +1,5 @@
 <<<<<<< HEAD
-import { db } from "@/lib/firebaseAdmin";
+
 import { NextResponse } from "next/server";
 
 export async function POST(req) {
@@ -30,7 +30,6 @@ export async function POST(req) {
     return NextResponse.json({ error: err.message }, { status: 500 });
 =======
 import { NextRequest, NextResponse } from "next/server"
-import { db } from "@/lib/firebaseAdmin"
 
 // Prevent static evaluation during build
 export const dynamic = "force-dynamic"
