@@ -1,34 +1,61 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db } from "@/lib/firebaseAdmin"
+import { createClient } from "@supabase/supabase-js"
 
-// Prevent build-time execution
-export const dynamic = "force-dynamic"
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
+// =====================================================
+// POST → USER clicks "RESERVE"
+// =====================================================
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
+    const { slotId } = body
 
-    const slotId = body?.slotId
-    const carPresent = body?.carPresent
-
-    if (typeof slotId !== "number" || typeof carPresent !== "boolean") {
+    if (!slotId) {
       return NextResponse.json(
-        { ok: false, error: "Invalid input" },
+        { error: "Missing slotId" },
         { status: 400 }
       )
     }
 
-    const slotRef = db.ref(`slots/slot${slotId}`)
+    // 🚨 THIS IS THE IMPORTANT PART (ANTI-DOUBLE BOOKING)
+    const { data, error } = await supabase
+      .from("slots")
+      .update({
+        status: "reserved",
+        reserved: true,
+        updated_at: new Date()
+      })
+      .eq("id", slotId)
+      .eq("status", "available") // 🔥 prevents double booking
+      .select()
 
-    await slotRef.update({
-      sensorStatus: carPresent ? "occupied" : "available"
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      )
+    }
+
+    // ❗ If no rows updated → already taken
+    if (!data || data.length === 0) {
+      return NextResponse.json(
+        { error: "Slot already reserved or occupied" },
+        { status: 409 }
+      )
+    }
+
+    return NextResponse.json({
+      success: true,
+      slot: data[0]
     })
-
-    return NextResponse.json({ ok: true })
 
   } catch (err: any) {
     return NextResponse.json(
-      { ok: false, error: err?.message || "Unknown error" },
+      { error: err.message },
       { status: 500 }
     )
   }

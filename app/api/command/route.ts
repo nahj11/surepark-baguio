@@ -1,120 +1,105 @@
 import { NextRequest, NextResponse } from "next/server"
-import { ref, get, update } from "firebase/database"
-import { db } from "@/lib/firebase"
+import { createClient } from "@supabase/supabase-js"
+
+// Create Supabase client (server-side safe)
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 // =====================================================
-// GET → ESP32 polls this every ~2 seconds
+// GET → ESP32 polls this every ~1 second
 // =====================================================
 export async function GET(req: NextRequest) {
-  const slotId = Number(req.nextUrl.searchParams.get("slotId"))
-
-  if (!slotId) {
-    return NextResponse.json(
-      { ok: false, error: "slotId required" },
-      { status: 400 }
-    )
-  }
-
   try {
-    const snapshot = await get(ref(db, `slots/slot${slotId}`))
+    const { searchParams } = new URL(req.url)
+    const slotId = searchParams.get("slotId")
 
-    if (!snapshot.exists()) {
+    if (!slotId) {
       return NextResponse.json(
-        { ok: false, error: `Slot ${slotId} not found` },
-        { status: 404 }
+        { error: "Missing slotId" },
+        { status: 400 }
       )
     }
 
-    const slot = snapshot.val()
+    const { data, error } = await supabase
+      .from("slots")
+      .select("*")
+      .eq("id", Number(slotId))
+      .single()
 
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({
+      success: true,
+      slot: data
+    })
+
+  } catch (err: any) {
     return NextResponse.json(
-      {
-        ok: true,
-        slotId: slotId,
-
-        // ✅ derive from Firebase
-        reserved: slot.reservedBy !== "",
-        paid: slot.paid || false,
-        bollardUp: slot.bollardUp ?? true,
-
-        // IMPORTANT: use sensorStatus (NOT status)
-        occupied: slot.sensorStatus === "occupied",
-      },
-      { headers: { "Cache-Control": "no-store" } }
-    )
-
-  } catch (err) {
-    return NextResponse.json(
-      { ok: false, error: "Failed to fetch slot" },
+      { error: err.message },
       { status: 500 }
     )
   }
 }
 
-
 // =====================================================
-// POST → App activates slot (open gate)
+// POST → ESP32 sends sensor updates (car detected)
 // =====================================================
 export async function POST(req: NextRequest) {
-  let body
-
   try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "Invalid JSON body" },
-      { status: 400 }
-    )
-  }
+    const body = await req.json()
+    const { slotId, carPresent } = body
 
-  const { slotId, activated } = body
-
-  if (typeof slotId !== "number" || typeof activated !== "boolean") {
-    return NextResponse.json(
-      { ok: false, error: "slotId (number) and activated (boolean) required" },
-      { status: 400 }
-    )
-  }
-
-  try {
-    const slotRef = ref(db, `slots/slot${slotId}`)
-    const snapshot = await get(slotRef)
-
-    if (!snapshot.exists()) {
+    if (slotId === undefined || carPresent === undefined) {
       return NextResponse.json(
-        { ok: false, error: `Slot ${slotId} not found` },
-        { status: 404 }
+        { error: "Missing slotId or carPresent" },
+        { status: 400 }
       )
     }
 
-    const slot = snapshot.val()
+    // 🚗 IF CAR ENTERS → OCCUPIED
+    if (carPresent === true) {
+      const { error } = await supabase
+        .from("slots")
+        .update({
+          status: "occupied",
+          reserved: false,
+          paid: true,
+          bollard_up: false,
+          updated_at: new Date()
+        })
+        .eq("id", slotId)
 
-    // 🚫 VALIDATION (same as your old logic)
-    if (activated && slot.reservedBy === "") {
-      return NextResponse.json(
-        { ok: false, error: "Slot must be reserved first" },
-        { status: 403 }
-      )
+      if (error) throw error
     }
 
-    if (activated && !slot.paid) {
-      return NextResponse.json(
-        { ok: false, error: "Payment required before activation" },
-        { status: 403 }
-      )
+    // 🚗 IF CAR LEAVES → RESET TO AVAILABLE
+    if (carPresent === false) {
+      const { error } = await supabase
+        .from("slots")
+        .update({
+          status: "available",
+          reserved: false,
+          paid: false,
+          bollard_up: true,
+          updated_at: new Date()
+        })
+        .eq("id", slotId)
+
+      if (error) throw error
     }
 
-    // ✅ UPDATE FIREBASE ONLY
-    await update(slotRef, {
-      activated: activated,
-      bollardUp: activated ? false : true   // open when activated
-    })
+    return NextResponse.json({ success: true })
 
-    return NextResponse.json({ ok: true })
-
-  } catch (err) {
+  } catch (err: any) {
     return NextResponse.json(
-      { ok: false, error: "Failed to update slot" },
+      { error: err.message },
       { status: 500 }
     )
   }
